@@ -295,6 +295,28 @@ def scrape_all_pages(base_url: str, cfg: dict) -> pd.DataFrame:
     
     return df
 
+#saving the data
+
+def save_data(df: pd.DataFrame, output_file: str) -> None:
+    """
+    Saves the DataFrame to a CSV file.
+    """
+    if df.empty:
+        logger.warning("No data to save. DataFrame is empty.")
+        return
+    
+    df = df.copy()
+    df["scraped_at"] = datetime.now().isoformat(timespec="seconds")
+    
+    if os.path.exists(output_file):
+        existing = pd.read_csv(output_file, parse_dates=["Date Posted"])
+        combined = pd.concat([existing, df], ignore_index=True)
+        combined.drop_duplicates(subset=["Link"], keep="last", inplace=True)
+        combined.to_csv(output_file, index=False)
+        logger.info(f"Appended {len(df)} new records to {output_file}. Total records now: {len(combined)}")
+    else:
+        df.to_csv(output_file, index=False)
+        logger.info(f"Saved {len(df)} records to new file {output_file}.")
 
 
 
