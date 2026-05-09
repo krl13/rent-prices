@@ -88,153 +88,222 @@ def retry(max_attepts: int = 3, delay_seconds: int = 2):
         return wrapper
     return decorator
 
-def fetch_data(url, http, headers):
-    #http = urllib3.PoolManager()
-    #headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)', 'Accept-Language': 'en-US,en;q=0.5'}
+#parse functions
+
+def parse_title_and_link(ad) -> dict:
+    """
+    Extracts the title and link from an ad element.
+    """
+    result = {"Title": None, "Link": None}
+    title_tag = ad.find('h3', class_='product-title')
+    if not title_tag:
+        return result
+    
+    result["Title"] = title_tag.text.strip()
+    a_tag = title_tag.find("a")
+    if a_tag and "href" in a_tag.attrs:
+        result["Link"] = "https://www.halooglasi.com" + a_tag["href"]
+
+    return result
+
+def parse_price(ad) -> Optional[int]:
+    """
+    Extracts the price from an ad element and returns it as an integer.
+    """
+    price_div = ad.find("div", class_="central-feature")
+    if not price_div:
+        return None
+ 
+    digits = re.sub(r"[^\d]", "", price_div.text)
+    return int(digits) if digits else None
+
+def parse_floor(text: str) -> tuple[Optional[str], Optional[str]]:
+    """
+    Parses the floor information from a text string and returns the floor and total floors.
+    """
+    clean = text.replace("Spratnost", "").strip()
+    if "/" in clean:
+        parts = clean.split("/", 1)
+        return parts[0].strip(), parts[1].strip()
+    return clean or None, None
+
+def parse_attributes(ad) -> dict:
+    """
+    Extracts attributes such as square meters, number of rooms, and floor information from an ad element.
+    """
+    result = {
+        "Square Meters"  : None,
+        "Number of Rooms": None,
+        "Floor"          : None,
+        "Number of Floors": None,
+    }
+ 
+    for wrapper in ad.findAll("div", class_="value-wrapper"):
+        text = wrapper.text.strip()
+ 
+        if "Kvadratura" in text:
+            match = re.search(r"\d+", text)
+            if match:
+                result["Square Meters"] = int(match.group())
+ 
+        elif "Broj soba" in text:
+            match = re.search(r"\d+(\.\d+)?", text)
+            if match:
+                result["Number of Rooms"] = float(match.group())
+ 
+        elif "Spratnost" in text:
+            result["Floor"], result["Number of Floors"] = parse_floor(text)
+ 
+    return result
+
+def parse_location(ad) -> dict:
+    """
+    Extracts location information such as city, municipality, neighborhood, and street from an ad element.
+    """
+    keys = ["City", "Municipality", "Neighborhood", "Street"]
+    result = dict.fromkeys(keys)
+ 
+    location_ul = ad.find("ul", class_="subtitle-places")
+    if not location_ul:
+        return result
+ 
+    places = [li.text.strip() for li in location_ul.find_all("li")]
+    for i, key in enumerate(keys):
+        result[key] = places[i] if i < len(places) else None
+ 
+    return result
+
+def parse_advertiser(ad) -> Optional[str]:
+    """
+    Extracts the advertiser type from an ad element and returns it as a standardized string.
+    """
+    span = ad.find("span", attrs={"data-field-name": "oglasivac_nekretnine_s"})
+    if not span:
+        return None
+ 
+    mapping = {"vlasnik": "Owner", "agencija": "Agency", "Investitor": "Investor"}
+    raw = span.get("data-field-value", span.text).strip().lower()
+    return mapping.get(raw, raw.title())
+
+def parse_date(ad) -> Optional[datetime]:
+    """
+    Extracts the date posted from an ad element and returns it as a datetime object.
+    """
+    date_span = ad.find("span", class_="publish-date")
+    if not date_span:
+        return None
     try:
-        resp = http.request('GET', url, headers=headers)
-        if resp.status != 200:
-            print(f'HTTP {resp.status} error from {url}')
-            return None
-    except Exception as e:
-        print(f"Error fetching {url}: {e}")
+        return datetime.strptime(date_span.text.strip(), "%d.%m.%Y.")
+    except ValueError:
+        logger.debug(f"Could not parse date: '{date_span.text.strip()}'")
         return None
     
-    html = resp.data.decode('utf-8', errors='ignore')
-    soup = BeautifulSoup(html, 'lxml')
+def parse_single_ad(ad) -> dict:
+    """
+    Composes all parsing functions to extract all relevant information from a single ad element and returns it as a dictionary.
+    """
+    record = {}
+    record.update(parse_title_and_link(ad))
+    record["Price (€)"] = parse_price(ad)
+    record.update(parse_attributes(ad))
+    record.update(parse_location(ad))
+    record["Advertiser Type"] = parse_advertiser(ad)
+    record["Date Posted"]     = parse_date(ad)
+    return record
 
-    ads = soup.findAll('div', attrs={'class' : 'product-item'})
-    data = []
-
-    for ad in ads:
-        ad_data = {
-            'Title': None,
-            'Price (€)': None,
-            'Square Meters': None,
-            'Number of Rooms': None,
-            'City': None,
-            'Municipality': None,
-            'Neighborhood': None,
-            'Street': None,
-            'Floor': None,
-            'Number of Floors': None,
-            'Advertiser Type': None,
-            'Date Posted': None,
-            'Link': None
-        }
+#html fetching function
+@retry(max_attepts=CONFIG["max_retries"], delay_seconds=CONFIG["retry_dealy_seconds"])
+def fetch_html(url: str, http: urllib3.PoolManager, headers: dict) -> Optional[str]:
+    """
+    Fetches the HTML content of a given URL using the provided HTTP manager and headers.
+    """
+    resp = http.request("GET", url, headers=headers)
+    if resp.status != 200:
+        logger.error(f"HTTP {resp.status} error from {url}")
+        return None
     
-        title = ad.find('h3', class_ = 'product-title')
-        if title:
-            ad_data['Title'] = title.text.strip()
-            a_tag = title.find('a')
-            if a_tag and 'href' in a_tag.attrs:
-                ad_data['Link'] = 'https://www.halooglasi.com' + a_tag['href']
-        
-        price = ad.find('div', class_ = 'central-feature')
-        if price:
-            clean_price = price.text.replace("\xa0€", "").replace('.', '').strip()
-            if clean_price.isdigit():
-                ad_data['Price (€)'] = int(clean_price)
-        
-        attributes = ad.findAll('div', class_ = 'value-wrapper')
-        for attribute in attributes:
-            text = attribute.text.strip()
+    logger.debug(f"Successfully fetched HTML from {url}")
+    return resp.data.decode("utf-8", errors="ignore")
 
-            if 'Kvadratura' in text:
-                match = re.search(r'\d+', text)
-                if match:
-                    ad_data['Square Meters'] = int(match.group())
-            elif 'Broj soba' in text:
-                match = re.search(r'\d+(\.\d+)?', text)
-                if match:
-                    ad_data['Number of Rooms'] = float(match.group())
-            elif 'Spratnost' in text:
-                clean_floor = text.replace('Spratnost', '').strip()
-                if '/' in clean_floor:
-                    floor_parts = clean_floor.split('/')
-                    ad_data['Floor'] = floor_parts[0].strip()
-                    ad_data['Number of Floors'] = floor_parts[1].strip()
-                else:
-                    ad_data['Floor'] = clean_floor
-                    ad_data['Number of Floors'] = None
+#main scraping functions
 
-        location = ad.find('ul', class_ = 'subtitle-places')
-        if location:
-            places = location.find_all('li')
-            places_text = [place.text.strip() for place in places]
-
-            if len(places_text) > 0:
-                ad_data['City'] = places_text[0]
-            if len(places_text) > 1:
-                ad_data['Municipality'] = places_text[1]
-            if len(places_text) > 2:
-                ad_data['Neighborhood'] = places_text[2]
-            if len(places_text) > 3:
-                ad_data['Street'] = places_text[3]
-
-        advertiser = ad.find('span', attrs={'data-field-name': 'oglasivac_nekretnine_s'})
-        if advertiser:
-            advertiser_text = advertiser.get('data-field-value', '').strip().lower()
-
-            if advertiser_text == 'vlasnik':
-                ad_data['Advertiser Type'] = 'Owner'
-            elif advertiser_text == 'agencija':
-                ad_data['Advertiser Type'] = 'Agency'
-            else:
-                ad_data['Advertiser Type'] = advertiser.text.strip()
-        else:
-            ad_data['Advertiser Type'] = None
-
-        
-        date = ad.find('span', class_ = 'publish-date')
-        if date:
-            try:
-                ad_data['Date Posted'] = datetime.strptime(date.text.strip(), '%d.%m.%Y.')
-            except ValueError:
-                pass
-        
-        data.append(ad_data)
+def scrape_page(url:str, http: urllib3.PoolManager, headers: dict) -> Optional[list[dict]]:
+    """"
+    Scrapes a single page of listings from the given URL and returns a list of dictionaries containing the extracted data.
+    """
+    html = fetch_html(url, http, headers)
+    if not html:
+        return None
     
-    return data
+    soup = BeautifulSoup(html, "lxml")
+    ads = soup.findAll("div", class_="product-item")
+    logger.debug(f"Found {len(ads)} ads on {url}")
+    
+    return [parse_single_ad(ad) for ad in ads]
 
-def extract_multiple_pages(url):
-    http = urllib3.PoolManager()
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)', 'Accept-Language': 'en-US,en;q=0.5'}
+def build_page_url(base_url: str, page: int) -> str:
+    """"
+    Constructs the URL for a specific page number based on the base URL.
+    """
+    if page == 1:
+        return base_url
+    separator = "&" if "?" in base_url else "?"
+    return f"{base_url}{separator}page={page}"
 
-    data = []
+def scrape_all_pages(base_url: str, cfg: dict) -> pd.DataFrame:
+    """
+    Scrapes all pages of listings from the given base URL and returns a pandas DataFrame containing the extracted data.
+    """
+    http    = urllib3.PoolManager()
+    headers = cfg["headers"]
+    delay   = cfg["delay_seconds"]
+    max_pg  = cfg["max_pages"]
+
+    all_records: list[dict] = []
     page = 1
 
     while True:
-        if page == 1:
-            page_url = url
-        else:
-            separator = '&' if '?' in url else '?'
-            page_url = f"{url}{separator}page={page}"
+        if max_pg and page > max_pg:
+            logger.info(f"Reached maximum page limit of {max_pg}. Stopping pagination.")
+            break
 
-        page_data = fetch_data(page_url, http, headers)
+        url = build_page_url(base_url, page)
+        page_data = scrape_page(url, http, headers)
+
         if page_data is None:
-            print(f"Failed to fetch data from {page_url}. Stopping pagination.")
+            logger.error(f"Failed to scrape data from {url}. Stopping pagination.")
             break
 
         if len(page_data) == 0:
-            print(f"No more data found on page {page}. Stopping pagination.")
+            logger.info(f"No more data found on page {page}. Stopping pagination.")
             break
 
-        data.extend(page_data)
+        logger.info(f"Scraped {page:>3}: {len(page_data)} records from page {page}. | Total so far: {len(all_records) + len(page_data)}")
+        all_records.extend(page_data)
 
-        time.sleep(1) 
+        time.sleep(delay)
         page += 1
 
-    df = pd.DataFrame(data)
-    df.dropna(subset=['Title', 'Price (€)'], inplace=True)  # Ensure we have at least title and price for each entry
+    df = pd.DataFrame(all_records)
 
     if not df.empty:
-        df.to_csv('rent_listings.csv', index=False)
-        print(f"Data saved to rent_listings.csv with {len(df)} entries.")
-    else:
-        print("No data found to save.")
+        before = len(df)
+        df.dropna(subset=["Title", "Price (€)"], inplace=True)
+        dropped = before - len(df)
+        if dropped:
+            logger.warning(f"Dropped {dropped} records due to missing Title or Price.")
     
     return df
+
+
+
+
+
+
+
+
+
+
 
 if __name__ == "__main__":
     city = 'beograd'
