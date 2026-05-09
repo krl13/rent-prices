@@ -324,6 +324,8 @@ def save_data(df: pd.DataFrame, output_file: str) -> None:
 def parse_cli_args():
     """
     Parses command-line arguments for the scraper.
+    Without changing the code, you can run the script with optional arguments to specify the city, maximum pages to scrape, delay between requests, and output file name. For example:
+    python rent_scraper.py --city novi-sad --max-pages 5 --delay 2 --output-file novi_sad_rentals.csv
     """
     parser = argparse.ArgumentParser(description="Scrape rental apartment listings from Halo Oglasi.")
     parser.add_argument("--city", type=str, default=CONFIG["city"], help="City to scrape (default: beograd)")
