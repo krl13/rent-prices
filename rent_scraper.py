@@ -334,16 +334,32 @@ def parse_cli_args():
     parser.add_argument("--output-file", type=str, default=CONFIG["output_file"], help="Output CSV file name (default: rent_listings.csv)")
     return parser.parse_args()
 
+def main() -> None:
+    args = parse_cli_args()
+    cfg = CONFIG.copy()
+    cfg["city"] = args.city
+    cfg["max_pages"] = args.max_pages
+    cfg["delay_seconds"] = args.delay
+    cfg["output_file"] = args.output_file
+
+    base_url = f"{cfg['base_url']}/{cfg['city']}"
+
+    logger.info(f"Starting scraper | City: {cfg['city']} | Max Pages: {cfg['max_pages'] or 'All'} | Delay: {cfg['delay_seconds']}s | Output: {cfg['output_file']}")
+
+    df = scrape_all_pages(base_url, cfg)
+
+    if df.empty:
+        logger.warning("No data scraped. Exiting without saving.")
+        return
+    
+    save_data(df, cfg["output_file"])
+
+    logger.info(f"Scraping completed successfully. Number of records scraped: {len(df)}")
+    logger.info(f"Columns: {list(df.columns)}")
+
+    print("\nFirst 5 records:\n")
+    print(df.head().to_string(index=False))
 
 if __name__ == "__main__":
-    city = 'beograd'
-    url = f'https://www.halooglasi.com/nekretnine/izdavanje-stanova/{city}'
-
-    flates = extract_multiple_pages(url)
-
-    if not flates.empty:
-        print(f"Extracted {len(flates)} flat listings from {url}")
-        print(flates.head())
-    else:
-        print("No flat listings found.")
+    main()
 
