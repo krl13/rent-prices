@@ -319,12 +319,18 @@ def save_data(df: pd.DataFrame, output_file: str) -> None:
         logger.info(f"Saved {len(df)} records to new file {output_file}.")
 
 
+#CLI Args parsing
 
-
-
-
-
-
+def parse_cli_args():
+    """
+    Parses command-line arguments for the scraper.
+    """
+    parser = argparse.ArgumentParser(description="Scrape rental apartment listings from Halo Oglasi.")
+    parser.add_argument("--city", type=str, default=CONFIG["city"], help="City to scrape (default: beograd)")
+    parser.add_argument("--max-pages", type=int, default=CONFIG["max_pages"], help="Maximum number of pages to scrape (default: all)")
+    parser.add_argument("--delay", type=float, default=CONFIG["delay_seconds"], help="Delay between page requests in seconds (default: 1.5)")
+    parser.add_argument("--output-file", type=str, default=CONFIG["output_file"], help="Output CSV file name (default: rent_listings.csv)")
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
