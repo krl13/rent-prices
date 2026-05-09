@@ -63,6 +63,31 @@ def setup_logger(log_file: str = "scraper.log") -> logging.Logger:
 
 logger = setup_logger()
 
+def retry(max_attepts: int = 3, delay_seconds: int = 2):
+    """
+    Decorator to retry a function if it raises an exception.
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            for attempt in range(1, max_attepts + 1):
+                try:
+                    result = func(*args, **kwargs)
+                    if result is not None:
+                        return result
+                except Exception as e:
+                    logger.warning(f"Attempt {attempt} failed with error: {e}")
+                
+                if attempt < max_attepts:
+                    wait = delay_seconds * attempt
+                    logger.warning(f"[{func.__name__}] Attempt {attempt} failed. Retrying in {wait} seconds...")
+                    time.sleep(wait)
+                
+                logger.error(f"[{func.__name__}] All {max_attepts} attempts failed.")
+                return None
+        return wrapper
+    return decorator
+
 def fetch_data(url, http, headers):
     #http = urllib3.PoolManager()
     #headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)', 'Accept-Language': 'en-US,en;q=0.5'}
