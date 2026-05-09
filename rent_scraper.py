@@ -1,9 +1,67 @@
+"""
+Web scraper for rental apartment listings on Halo Oglasi.
+
+Author: Vuk Krstić
+Description: This script scrapes rental apartment listings from the Halo Oglasi website for a specified city. 
+It extracts details such as title, price, square meters, number of rooms, location, advertiser type, and date posted. 
+The data is saved to a CSV file. 
+Usage: Run the script and it will scrape listings for Belgrade by default.
+"""
+
+#import necessary libraries
+import os
 import urllib3
 from bs4 import BeautifulSoup
 import pandas as pd
 import re
 from datetime import datetime
 import time
+import logging
+import argparse
+from functools import wraps
+from typing import Optional
+
+#config
+CONFIG = {
+    "base_url": "https://www.halooglasi.com/nekretnine/izdavanje-stanova",
+    "city": "beograd",
+    "delay_seconds": 1.5,
+    "output_file": "rent_listings.csv",
+    "max_pages": None,
+    "max_retries": 3,
+    "retry_dealy_seconds": 2,
+    "headers": {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)', 'Accept-Language': 'en-US,en;q=0.5'}
+}
+
+#logging setup
+def setup_logger(log_file: str = "scraper.log") -> logging.Logger:
+    """
+    Sets up a logger to log messages to both console and a file.
+    """
+    logger = logging.getLogger("halooglasi")
+    logger.setLever(logging.DEBUG)
+
+    formatter = logging.Formatter(
+        fmt="%(asctime)s - [%(levelname)-8s] - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    # Console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(formatter)
+
+    # File handler
+    file_handler = logging.FileHandler(log_file, encoding="utf-8")
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(formatter)
+
+    logger.addHandler(console_handler)
+    logger.addHandler(file_handler)
+
+    return logger
+
+logger = setup_logger()
 
 def fetch_data(url, http, headers):
     #http = urllib3.PoolManager()
@@ -15,7 +73,7 @@ def fetch_data(url, http, headers):
             return None
     except Exception as e:
         print(f"Error fetching {url}: {e}")
-        return Nonw
+        return None
     
     html = resp.data.decode('utf-8', errors='ignore')
     soup = BeautifulSoup(html, 'lxml')
